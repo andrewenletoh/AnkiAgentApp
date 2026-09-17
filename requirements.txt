@@ -3,3 +3,4 @@ strands-agents>=1.0.0
 strands-agents-tools>=0.2.0
 python-docx>=0.8.11
 PyPDF2>=3.0.0
+python-dotenv>=1.0.0
