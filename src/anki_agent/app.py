@@ -3,6 +3,7 @@ import logging
 import time
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
 from anki_agent.config import MissingBedrockConfigError
 from anki_agent.agent.agent import (
@@ -23,8 +24,8 @@ st.set_page_config(page_title="Anki Agent Chat", page_icon="\U0001F4D8")
 
 
 def init_session_state() -> bool:
-    """Ensures this browser session has its own session id / manager / agent.
-
+    """
+    Ensures this browser session has its own session id / manager / agent.
     Returns False (and renders a setup error) if Bedrock isn't configured yet.
     """
     if "agent_session_id" in st.session_state:
@@ -70,27 +71,34 @@ def switch_session_state(session_id: str | None, fresh: bool) -> None:
     st.session_state.file_uploader_key += 1
 
 
-async def get_response(user_message: str | None, uploaded_file: UploadedFile | None):
+async def stream_response(
+    user_message: str | None,
+    uploaded_file: UploadedFile | None,
+    placeholder: DeltaGenerator,
+) -> str:
+    """Streams the agent's reply token-by-token into `placeholder` and returns the full text."""
     content_block = build_prompt(
         user_message,
         uploaded_file.type.split("/")[-1] if uploaded_file else None,
         f"{uploaded_file.name.split('.')[0]}_{int(time.time())}" if uploaded_file else None,
         uploaded_file.read() if uploaded_file else None,
     )
-    response_parts = []
+    response_text = ""
     async for event in st.session_state.agent.stream_async(content_block):
         if "data" in event:
-            response_parts.append(event["data"])
-    return "".join(response_parts)
-
-
+            response_text += event["data"]
+            placeholder.markdown(response_text + "▌")
+    placeholder.markdown(response_text)
+    return response_text
+ 
+ 
 if not init_session_state():
     st.stop()
-
+ 
 agent = st.session_state.agent
 session_manager = st.session_state.session_manager
 session_id = st.session_state.agent_session_id
-
+ 
 # Load chat history for this session (only when it changes, e.g. after a switch)
 if st.session_state.loaded_session_id != session_id:
     messages = []
@@ -99,7 +107,7 @@ if st.session_state.loaded_session_id != session_id:
     except SessionException as e:
         if "Messages directory missing" not in str(e):
             raise
-
+ 
     st.session_state.chat_history = []
     for message in messages:
         content = message.message.get("content")
@@ -107,13 +115,13 @@ if st.session_state.loaded_session_id != session_id:
             role = "You" if message.message.get("role") == "user" else "Agent"
             st.session_state.chat_history.append((role, content[0].get("text")))
     st.session_state.loaded_session_id = session_id
-
+ 
 with st.sidebar:
     st.header("Anki Agent")
     if st.button("+ Start New Session"):
         switch_session_state(session_id=None, fresh=True)
         st.rerun()
-
+ 
     st.markdown("### Recent Sessions")
     with st.spinner("Loading Recent Sessions..."):
         for session in retrieve_sessions_list():
@@ -123,10 +131,10 @@ with st.sidebar:
                 has_messages = bool(session_manager.list_messages(other_id, agent.agent_id))
             except Exception:
                 has_messages = False
-
+ 
             if not has_messages:
                 continue
-
+ 
             if other_id == session_id:
                 st.button(f"{other_id} - [Active]", disabled=True, key=f"session_{other_id}")
             else:
@@ -134,8 +142,15 @@ with st.sidebar:
                     switch_session_state(session_id=other_id, fresh=False)
                     st.rerun()
 
+
 st.title("Anki Agent Chat")
 st.markdown("Interact with your Strands-based agent using this simple Streamlit interface.")
+
+# Render existing history first, so it's on screen before we handle new input.
+for speaker, text in st.session_state.chat_history:
+    role = "user" if speaker == "You" else "assistant"
+    with st.chat_message(role):
+        st.markdown(text)
 
 prompt = st.chat_input(
     placeholder="Type your message here...",
@@ -148,19 +163,29 @@ user_message = prompt.text if prompt and prompt.text else None
 uploaded_file = prompt.files[0] if prompt and prompt["files"] else None
 
 if user_message or uploaded_file:
-    st.session_state.chat_history.append(("You", user_message))
-    with st.spinner("Agent is thinking..."):
-        try:
-            agent_response = asyncio.run(get_response(user_message, uploaded_file))
-        except Exception:
-            logger.exception("Agent call failed")
-            agent_response = "Sorry, something went wrong handling that message. Please try again."
-        st.session_state.file_uploader_key += 1
+    if user_message is not None:
+        user_display_text = user_message
+    elif uploaded_file is not None:
+        user_display_text = f"{uploaded_file.name}"
+    else:
+        user_display_text = ""
 
+    st.session_state.chat_history.append(("You", user_display_text))
+
+    with st.chat_message("user"):
+        st.markdown(user_display_text)
+
+    
+        with st.chat_message("assistant"):
+            placeholder = st.empty()
+            placeholder.markdown("|")
+            try:
+                agent_response = asyncio.run(stream_response(user_message, uploaded_file, placeholder))
+            except Exception:
+                logger.exception("Agent call failed")
+                agent_response = "Sorry, something went wrong handling that message. Please try again."
+                placeholder.markdown(agent_response)
+ 
     st.session_state.chat_history.append(("Agent", agent_response))
+    st.session_state.file_uploader_key += 1
     st.rerun()
-
-for speaker, text in st.session_state.chat_history:
-    role = "user" if speaker == "You" else "assistant"
-    with st.chat_message(role):
-        st.markdown(text)
