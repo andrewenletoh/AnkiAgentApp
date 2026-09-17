@@ -49,7 +49,7 @@ def init_session_state() -> bool:
     return True
 
 
-def switch_session_state(session_id: str, fresh: bool) -> None:
+def switch_session_state(session_id: str | None, fresh: bool) -> None:
     """Points this browser session at a new or existing agent session."""
     old_manager = st.session_state.get("session_manager")
     old_session_id = st.session_state.get("agent_session_id")
@@ -60,6 +60,8 @@ def switch_session_state(session_id: str, fresh: bool) -> None:
     if fresh:
         session_id, session_manager, agent = create_new_agent_session()
     else:
+        if session_id is None:
+            raise ValueError("session_id is required when fresh=False")
         session_id, session_manager, agent = load_agent_session(session_id)
 
     st.session_state.agent_session_id = session_id
