@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 
-import nest_asyncio
 import streamlit as st
 
 from anki_agent.config import MissingBedrockConfigError
@@ -19,7 +18,6 @@ from strands.types.exceptions import SessionException
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 
 logger = logging.getLogger(__name__)
-nest_asyncio.apply()
 
 st.set_page_config(page_title="Anki Agent Chat", page_icon="\U0001F4D8")
 

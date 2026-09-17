@@ -30,16 +30,21 @@ To configure it:
 ```
    AWS_REGION=us-west-2
    BEDROCK_MODEL_ID=global.amazon.nova-2-lite-v1:0
-```
+```pythonb
    Use whichever region and model you've enabled access to in the Bedrock console. `.env` is gitignored and never committed.
  
 All Bedrock usage is billed to whichever AWS credentials are active when you run the app.
 
 ## Setup
  
+Set up a virtual environment so dependencies stay scoped to this project, then install:
+ 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # on Windows: .venv\Scripts\activate
 pip install -e .
 ```
+
  
 ## Usage
  
