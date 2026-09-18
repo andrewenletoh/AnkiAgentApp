@@ -80,4 +80,5 @@ This project is a work in progress.
 - Figure out how to make a tool call work for image occlusion note types
 - Fix anki deck plaintext import file generation and storage
 - Gotta take another look at the context window and token limit, will have to consider some constraints and how to break up the tasks.
-- User input from friends says that File uploading is somewhat hindered by poor file type accomodation and uncertainty on how the agent parses the information into actual cards. Need to look into how to give more directive control to user on generating cards without typing a prompt with the same volume as it would be to just create the card.
+- User feedback from friends says that File uploading is somewhat hindered by poor file type accomodation and uncertainty on how the agent parses the information into actual cards. Need to look into how to give more directive control to user on generating cards without typing a prompt with the same volume as it would be to just create the card.
+- User feedback also mentions that setting up AWS is kind of a pain. Should probably update the README.md to include clear instructions on how to do so. 
