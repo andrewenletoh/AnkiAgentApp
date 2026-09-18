@@ -177,14 +177,17 @@ if user_message or uploaded_file:
 
     
         with st.chat_message("assistant"):
+            tool_status = st.status("Thinking...", expanded=False)
             placeholder = st.empty()
             placeholder.markdown("|")
             try:
                 agent_response = asyncio.run(stream_response(user_message, uploaded_file, placeholder))
+                tool_status.update(label="Done", state="complete")
             except Exception:
                 logger.exception("Agent call failed")
                 agent_response = "Sorry, something went wrong handling that message. Please try again."
                 placeholder.markdown(agent_response)
+                tool_status.update(label="Error", state="error")
  
     st.session_state.chat_history.append(("Agent", agent_response))
     st.session_state.file_uploader_key += 1
