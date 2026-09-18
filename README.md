@@ -6,7 +6,7 @@ Built with [Strands Agents](https://github.com/strands-agents/sdk-python) and Am
  
 ## Features
  
-- Conversational flashcard creation — the agent asks about content and note types before generating cards
+- Conversational flashcard creation: the agent asks about content and note types before generating cards
 - Supports Basic, Basic (reversed), Basic (optional reversed), and Cloze note types
 - Upload a PDF, DOCX, or TXT file as source material
 - Exports notes as a tab-delimited plaintext file ready to import into Anki
@@ -70,4 +70,14 @@ sessions/                    # Saved chat sessions (auto-generated, gitignored)
  
 ## Status
  
-This project is a work in progress. Known gaps include: no image occlusion support yet, limited error handling, and the flashcard file-export path isn't sandboxed. See inline `TODO`s in the code for details.
+This project is a work in progress.
+
+### To Do
+
+- Tool call recording is still wonky, need to figure out what behaviors and consistent outputs I want to ensure
+- Session and Agent invokation may be redundant, need to investigate and check docs on that.
+-Fix loading sessions more efficiently in side bar. Also give each session a summarized one-liner instead of session id (might need a separate agent or something for that?)
+- Figure out how to make a tool call work for image occlusion note types
+- Fix anki deck plaintext import file generation and storage
+- Gotta take another look at the context window and token limit, will have to consider some constraints and how to break up the tasks.
+- User input from friends says that File uploading is somewhat hindered by poor file type accomodation and uncertainty on how the agent parses the information into actual cards. Need to look into how to give more directive control to user on generating cards without typing a prompt with the same volume as it would be to just create the card.
