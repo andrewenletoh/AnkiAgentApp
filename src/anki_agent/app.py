@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 st.set_page_config(page_title="Anki Agent Chat", page_icon="\U0001F4D8")
 
 
+
 def init_session_state() -> bool:
     """
     Ensures this browser session has its own session id / manager / agent.
@@ -50,6 +51,7 @@ def init_session_state() -> bool:
     return True
 
 
+
 def switch_session_state(session_id: str | None, fresh: bool) -> None:
     """Points this browser session at a new or existing agent session."""
     old_manager = st.session_state.get("session_manager")
@@ -71,12 +73,66 @@ def switch_session_state(session_id: str | None, fresh: bool) -> None:
     st.session_state.file_uploader_key += 1
 
 
+
+def construct_chat_history(messages: list) -> list[dict]:
+    """
+    Build UI-ready chat turns from persisted Strands session messages.
+    A single user turn can involve several internal assistant/tool-result
+    messages before the final text reply. This groups everything between one
+    real user message and the next into a single assistant turn, combining
+    all the tool names it called along the way with its final text.
+    """
+    history: list[dict] = []
+    pending_text = ""
+    pending_tool_calls: list[str] = []
+ 
+    def flush_assistant_turn() -> None:
+        nonlocal pending_text, pending_tool_calls
+        if pending_text or pending_tool_calls:
+            history.append({
+                "role": "assistant",
+                "text": pending_text,
+                "tool_calls": pending_tool_calls,
+            })
+        pending_text = ""
+        pending_tool_calls = []
+ 
+    for message in messages:
+        content = message.message.get("content") or []
+        role = message.message.get("role")
+        has_tool_result = any("toolResult" in block for block in content)
+        text = "".join(block.get("text", "") for block in content if "text" in block)
+        tool_names = [
+            block["toolUse"]["name"]
+            for block in content
+            if block.get("toolUse") and block["toolUse"].get("name")
+        ]
+ 
+        if role == "user" and not has_tool_result:
+            flush_assistant_turn()
+            if text:
+                history.append({"role": "user", "text": text, "tool_calls": []})
+        elif role == "assistant":
+            pending_text += text
+            pending_tool_calls.extend(tool_names)
+        # else: a synthetic tool-result carrier message - already reflected
+        # in the preceding assistant turn's tool_calls, so skip it here.
+ 
+    flush_assistant_turn()
+    return history
+
+
+
 async def stream_response(
     user_message: str | None,
     uploaded_file: UploadedFile | None,
     placeholder: DeltaGenerator,
-) -> str:
-    """Streams the agent's reply token-by-token into `placeholder` and returns the full text."""
+    tool_status: DeltaGenerator,
+) -> tuple[str, list[str]]:
+    """
+    Streams the agent's reply token-by-token into `placeholder`, surfaces tool
+    calls into `tool_status` as they happen, and returns (full text, tool names called).
+    """
     content_block = build_prompt(
         user_message,
         uploaded_file.type.split("/")[-1] if uploaded_file else None,
@@ -84,12 +140,26 @@ async def stream_response(
         uploaded_file.read() if uploaded_file else None,
     )
     response_text = ""
+    seen_tool_use_ids: set[str] = set()
+    tool_calls: list[str] = []
+
     async for event in st.session_state.agent.stream_async(content_block):
         if "data" in event:
             response_text += event["data"]
-            placeholder.markdown(response_text + "▌")
+            placeholder.markdown(response_text + "|")
+        elif "current_tool_use" in event:
+            tool_use = event["current_tool_use"]
+            tool_use_id = tool_use.get("toolUseId")
+            tool_name = tool_use.get("name")
+            if tool_use_id and tool_name and tool_use_id not in seen_tool_use_ids:
+                seen_tool_use_ids.add(tool_use_id)
+                tool_calls.append(tool_name)
+                tool_status.update(expanded=True)
+                tool_status.write(f"Calling `{tool_name}`")
+
     placeholder.markdown(response_text)
-    return response_text
+    return response_text, tool_calls
+
  
  
 if not init_session_state():
@@ -107,13 +177,8 @@ if st.session_state.loaded_session_id != session_id:
     except SessionException as e:
         if "Messages directory missing" not in str(e):
             raise
- 
-    st.session_state.chat_history = []
-    for message in messages:
-        content = message.message.get("content")
-        if content and content[0].get("text") is not None:
-            role = "You" if message.message.get("role") == "user" else "Agent"
-            st.session_state.chat_history.append((role, content[0].get("text")))
+
+    st.session_state.chat_history = construct_chat_history(messages)
     st.session_state.loaded_session_id = session_id
  
 with st.sidebar:
@@ -147,10 +212,13 @@ st.title("Anki Agent Chat")
 st.markdown("Interact with your Strands-based agent using this simple Streamlit interface.")
 
 # Render existing history first, so it's on screen before we handle new input.
-for speaker, text in st.session_state.chat_history:
-    role = "user" if speaker == "You" else "assistant"
-    with st.chat_message(role):
-        st.markdown(text)
+for turn in st.session_state.chat_history:
+    with st.chat_message(turn["role"]):
+        if turn["tool_calls"]:
+            with st.expander(f"{len(turn['tool_calls'])} tool call(s)", expanded=False):
+                for tool_name in turn["tool_calls"]:
+                    st.markdown(f"- `{tool_name}`")
+        st.markdown(turn["text"])
 
 prompt = st.chat_input(
     placeholder="Type your message here...",
@@ -170,7 +238,7 @@ if user_message or uploaded_file:
     else:
         user_display_text = ""
 
-    st.session_state.chat_history.append(("You", user_display_text))
+    st.session_state.chat_history.append({"role": "user", "text": user_display_text, "tool_calls": []})
 
     with st.chat_message("user"):
         st.markdown(user_display_text)
@@ -181,14 +249,19 @@ if user_message or uploaded_file:
             placeholder = st.empty()
             placeholder.markdown("|")
             try:
-                agent_response = asyncio.run(stream_response(user_message, uploaded_file, placeholder))
+                agent_response, tool_calls = asyncio.run(stream_response(user_message, uploaded_file, placeholder, tool_status))
                 tool_status.update(label="Done", state="complete")
             except Exception:
                 logger.exception("Agent call failed")
                 agent_response = "Sorry, something went wrong handling that message. Please try again."
+                tool_calls = []
                 placeholder.markdown(agent_response)
                 tool_status.update(label="Error", state="error")
  
-    st.session_state.chat_history.append(("Agent", agent_response))
+    st.session_state.chat_history.append({
+        "role": "assistant",
+        "text": agent_response,
+        "tool_calls": tool_calls,
+    })
     st.session_state.file_uploader_key += 1
     st.rerun()
